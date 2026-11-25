@@ -151,6 +151,7 @@ extension Animation {
     static let qPage = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.5)
     static let qSpring = Animation.timingCurve(0.3, 1.5, 0.5, 1, duration: 0.35)
     static let qSpin = Animation.timingCurve(0.4, 0.1, 0.3, 1, duration: 0.9)
+    static let qMode = Animation.timingCurve(0.45, 0, 0.25, 1, duration: 0.42) // 简/常切换：两头都慢，不回弹，不晃眼
 }
 func motion(_ a: Animation) -> Animation? { reduceMotion ? nil : a }
 
@@ -161,7 +162,8 @@ var curSym: String { useCny ? "¥" : "US$" }
 
 // MARK: 数据与设置
 let ud = UserDefaults.standard
-struct CostSum { var today = 0.0; var week = 0.0; var daily = [Double](repeating: 0, count: 14); var ok = false }
+struct CostSum { var today = 0.0; var week = 0.0; var daily = [Double](repeating: 0, count: 14); var ok = false
+    var todayTok = 0.0; var weekTok = 0.0; var dailyTok = [Double](repeating: 0, count: 14) }
 
 final class Store: ObservableObject {
     @Published var provs: [Prov] = []
@@ -213,6 +215,13 @@ final class Store: ObservableObject {
     }
     /// 数据最旧的那家是几分钟前的
     var staleMin: Int { (visible.compactMap { $0.checked }.map { Int(Date().timeIntervalSince($0) / 60) }.max()) ?? 0 }
+    /// 花费显示成 Token：currency == 2
+    var tokenMode: Bool { currency == 2 }
+    /// 按设置显示成美元 / 人民币 / token
+    func spend(_ usd: Double, _ tok: Double, compact: Bool = false) -> String {
+        if tokenMode { return hidePrivate ? "•••" : fmtTok(tok) + (compact ? "" : " token") }
+        return money(usd, compact: compact)
+    }
     func money(_ usd: Double, compact: Bool = false) -> String {
         if hidePrivate { return curSym + "•••" }
         let v = useCny ? usd * usdToCny : usd
@@ -222,14 +231,14 @@ final class Store: ObservableObject {
     func loadCost(force: Bool = false) {
         if !force && Date().timeIntervalSince(costAt) < 120 { return }
         costAt = Date()
-        if isDemo { cost = CostSum(today: 18.42, week: 96.30, daily: [6, 9, 7, 14, 11, 8, 12, 15, 10, 13, 19, 12, 16, 18.42], ok: true); return }
+        if isDemo { let d = [6, 9, 7, 14, 11, 8, 12, 15, 10, 13, 19, 12, 16, 18.42]; cost = CostSum(today: 18.42, week: 96.30, daily: d, ok: true, todayTok: 24.6e6, weekTok: 131e6, dailyTok: d.map { $0 * 1.34e6 }); return }
         DispatchQueue.global(qos: .utility).async {
             let cal = Calendar.current, start = cal.date(byAdding: .day, value: -13, to: cal.startOfDay(for: Date()))!
             guard let reqs = loadT3Requests(since: start) else { return }
-            var days = [Double](repeating: 0, count: 14)
-            for q in reqs { let d = cal.dateComponents([.day], from: start, to: cal.startOfDay(for: q.date)).day ?? -1; if d >= 0 && d < 14 { days[d] += q.cost } }
+            var days = [Double](repeating: 0, count: 14), toks = [Double](repeating: 0, count: 14)
+            for q in reqs { let d = cal.dateComponents([.day], from: start, to: cal.startOfDay(for: q.date)).day ?? -1; if d >= 0 && d < 14 { days[d] += q.cost; toks[d] += q.tokens } }
             DispatchQueue.main.async {
-                self.cost = CostSum(today: days[13], week: days[7...].reduce(0, +), daily: days, ok: true)
+                self.cost = CostSum(today: days[13], week: days[7...].reduce(0, +), daily: days, ok: true, todayTok: toks[13], weekTok: toks[7...].reduce(0, +), dailyTok: toks)
                 if self.barMode == 3 { self.onChange?() }
             }
         }
@@ -272,7 +281,7 @@ final class Store: ObservableObject {
                     if let l = left(win) { add(num(l), l < 20 ? .systemRed : .labelColor) } else { add("–", .secondaryLabelColor) }
                 }
             }
-        case 3: add(cost.ok ? money(cost.today, compact: true) : "–")
+        case 3: add(cost.ok ? spend(cost.today, cost.todayTok, compact: true) : "–")
         default: break
         }
         return title
@@ -383,16 +392,18 @@ struct Seg: View {
 }
 /// 管理页的小分段：选中的是蓝底白字（照 Cindy）
 struct PillSeg: View {
-    let items: [String]; @Binding var sel: Int
+    let items: [String]; @Binding var sel: Int; var small = false
+    @Namespace private var ns
     var body: some View {
         HStack(spacing: 0) {
             ForEach(items.indices, id: \.self) { i in
-                Text(items[i]).font(.system(size: 12, weight: sel == i ? .semibold : .regular))
+                Text(items[i]).font(.system(size: small ? 11 : 12, weight: sel == i ? .semibold : .regular))
                     .foregroundColor(sel == i ? .white : .primary.opacity(0.75))
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(sel == i ? Color.accentColor : .clear))
+                    .lineLimit(1).fixedSize()
+                    .padding(.horizontal, small ? 8 : 10).padding(.vertical, small ? 3 : 5)
+                    .background { if sel == i { RoundedRectangle(cornerRadius: 7).fill(Color.accentColor).matchedGeometryEffect(id: "sel", in: ns) } } // 选中块滑过去，不是一闪
                     .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(motion(.qSpring)) { sel = i } }
+                    .onTapGesture { withAnimation(motion(.qMode)) { sel = i } }
             }
         }.padding(2).background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.07)))
     }
@@ -431,8 +442,7 @@ struct Root: View {
                 ManagePage(s: s, page: $page).transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .frame(width: s.compact ? 320 : 380).clipped()
-        .animation(motion(.qPage), value: s.compact)
+        .frame(width: 360).clipped() // 两种样式同宽，切换时只变高度，不左右跳
         .background(PanelBG(color: bestColor))
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in s.reload() }
     }
@@ -476,16 +486,27 @@ func makeHeadline(_ ps: [Prov]) -> Headline {
 struct MainPage: View {
     @ObservedObject var s: Store; @Binding var page: Int
     @State var spins = 0.0
+    @State var dragging: String?
+    @State var reveal = 1.0      // 下面内容的显隐：1 = 拉下来，0 = 收起
+    @State var switching = false
+    @State var modeSel = -1      // 顶栏「简丨常」的选中块，点下去先滑过去，内容随后再换
     var rise: Bool { s.rise }
     var body: some View {
         let h = makeHeadline(s.visible)
         let best = s.visible.compactMap { p in effLeft(p).map { (p, $0) } }.max { $0.1 < $1.1 }?.0.file
         VStack(alignment: .leading, spacing: 0) {
+            // 顶栏：简、常两种样式一模一样，切换时完全不动
             HStack(spacing: 8) {
-                Image(nsImage: tokenIcon(17)).resizable().renderingMode(.template).frame(width: 17, height: 17)
-                Text("用量").font(.system(size: 15, weight: .bold))
-                Text(freshText).font(.system(size: 12)).foregroundColor(s.staleMin > 30 ? .orange : .secondary)
+                // 点左上角图标切换样式：极简是线框图标，正常是立体图标
+                Button {
+                    let toFull = s.compact
+                    withAnimation(motion(.qSpring)) { modeSel = toFull ? 1 : 0 }
+                    switchMode()
+                } label: { ModeIcon(raised: modeSel < 0 ? !s.compact : modeSel == 1).contentShape(Circle()) }
+                .buttonStyle(PressStyle(scale: 0.86)).modifier(Lift(by: 1))
+                .help(s.compact ? "点一下：展开成正常样式" : "点一下：收成极简样式")
                 Spacer()
+                if s.staleMin > 30 { Text(freshText).font(.system(size: 12)).foregroundColor(.orange) } // 数据旧了才露出
                 Button {
                     withAnimation(motion(.qSpin)) { spins += 1 }
                     s.reload(); s.loadCost(force: true)
@@ -494,37 +515,64 @@ struct MainPage: View {
                     Image(systemName: "arrow.clockwise").font(.system(size: 14, weight: .medium)).foregroundColor(.secondary)
                         .rotationEffect(.degrees(spins * 360)).frame(width: 26, height: 26).contentShape(Rectangle())
                 }.buttonStyle(PressStyle(scale: 0.85)).help(s.staleMin > 5 ? "重新读取，并在后台打开 T3 Code 刷新额度" : "重新读取")
-            }.padding(.horizontal, 20).padding(.top, 16)
+            }.padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 10)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(h.main).font(.system(size: s.compact ? 16 : 18, weight: .semibold)).foregroundColor(inkStrong)
-                    .contentTransition(.opacity).animation(motion(.qPage), value: h.main)
-                if !s.compact, let sub = h.sub { Text(sub).font(.system(size: 11.5)).foregroundColor(h.warn ? .orange : .secondary).lineLimit(2) }
-            }.padding(.horizontal, 20).padding(.top, s.compact ? 10 : 12).padding(.bottom, s.compact ? 10 : 12)
-
-            Tile {
-                if s.visible.isEmpty { Text("在「管理」里打开要显示的几家").font(.system(size: 12)).foregroundColor(.secondary).padding(16) }
-                ForEach(Array(s.visible.enumerated()), id: \.element.id) { i, p in
-                    if i > 0 { Divider().padding(.leading, 16) }
-                    if s.compact { SlimRow(p: p, i: i, rise: rise, best: p.file == best, showUsed: s.showUsed) }
-                    else { ProvRow(p: p, i: i, rise: rise, best: p.file == best, showUsed: s.showUsed) }
+            // 下面的内容：切换样式时先收上去，换好再拉下来
+            VStack(alignment: .leading, spacing: 0) {
+                if !s.compact {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(h.main).font(.system(size: 18, weight: .semibold)).foregroundColor(inkStrong)
+                        if let sub = h.sub { Text(sub).font(.system(size: 11.5)).foregroundColor(h.warn ? .orange : .secondary).lineLimit(2) }
+                    }.padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 12)
                 }
-            }.padding(.horizontal, 14)
 
-            if s.compact { SlimCost(s: s).padding(.horizontal, 14).padding(.top, 8) }
-            else { CostTile(s: s).padding(.horizontal, 14).padding(.top, 10) }
+                Tile {
+                    if s.visible.isEmpty { Text("在「管理」里打开要显示的几家").font(.system(size: 12)).foregroundColor(.secondary).padding(16) }
+                    ForEach(Array(s.visible.enumerated()), id: \.element.id) { i, p in
+                        if i > 0 { Divider().padding(.leading, 16) }
+                        // 每一行都能拖动换位置，松手后顺序记住（和管理页是同一份顺序）
+                        Group {
+                            if s.compact { SlimRow(p: p, i: i, rise: rise, best: p.file == best, showUsed: s.showUsed) }
+                            else { ProvRow(p: p, i: i, rise: rise, best: p.file == best, showUsed: s.showUsed) }
+                        }
+                        .modifier(Reorderable(file: p.file, dragging: $dragging, s: s, dim: 0.35))
+                    }
+                }
+                .padding(.horizontal, 14)
 
-            HStack(spacing: 10) {
-                Button { s.openDetail?() } label: {
-                    HStack(spacing: 6) { Image(systemName: "chart.bar.xaxis").font(.system(size: 12, weight: .semibold)); Text("用量详情").font(.system(size: 13, weight: .semibold)) }
-                        .foregroundColor(Color(nsColor: .windowBackgroundColor)).padding(.horizontal, 16).padding(.vertical, 9)
-                        .background(Capsule().fill(inkStrong))
-                }.buttonStyle(PressStyle(scale: 0.97))
-                Spacer()
-                Button { withAnimation(motion(.qPage)) { page = 1 } } label: {
-                    Image(systemName: "gearshape").font(.system(size: 15)).foregroundColor(.secondary).frame(width: 28, height: 28).contentShape(Rectangle())
-                }.buttonStyle(PressStyle(scale: 0.88)).help("管理")
-            }.padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 14)
+                if s.compact { SlimCost(s: s).padding(.horizontal, 14).padding(.top, 10) }
+                else { CostTile(s: s).padding(.horizontal, 14).padding(.top, 10) }
+
+                HStack(spacing: 10) {
+                    Button { s.openDetail?() } label: {
+                        HStack(spacing: 6) { Image(systemName: "chart.bar.xaxis").font(.system(size: 12, weight: .semibold)); Text("用量详情").font(.system(size: 13, weight: .semibold)) }
+                            .foregroundColor(Color(nsColor: .windowBackgroundColor)).padding(.horizontal, 16).padding(.vertical, 9)
+                            .background(Capsule().fill(inkStrong))
+                    }.buttonStyle(PressStyle(scale: 0.97))
+                    Spacer()
+                    Button { withAnimation(motion(.qPage)) { page = 1 } } label: {
+                        Image(systemName: "gearshape").font(.system(size: 15)).foregroundColor(.secondary).frame(width: 28, height: 28).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle(scale: 0.88)).help("管理")
+                }.padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 14)
+            }
+            .opacity(reveal)
+            .offset(y: -16 * (1 - reveal))
+            .scaleEffect(x: 1, y: 0.97 + 0.03 * reveal, anchor: .top)
+        }
+    }
+    /// 换样式：先把下面收上去（0.16 秒），趁看不见时换内容、面板改高度，再慢慢拉下来（0.5 秒）
+    func switchMode() {
+        if switching { return }
+        if reduceMotion { s.compact.toggle(); modeSel = -1; return }
+        switching = true
+        withAnimation(.easeIn(duration: 0.16)) { reveal = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { s.compact.toggle() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.5)) { reveal = 1 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { switching = false; modeSel = -1 }
+            }
         }
     }
     var freshText: String {
@@ -546,24 +594,24 @@ struct ProvRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Circle().fill(provColor(p)).frame(width: 8, height: 8)
-                    Text(shown(p)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    if best { Text("最足").font(.system(size: 9.5, weight: .semibold)).foregroundColor(provColor(p)).padding(.horizontal, 5).padding(.vertical, 1.5).background(Capsule().fill(provColor(p).opacity(0.15))) }
+                    Text(shown(p)).font(.system(size: 13, weight: .semibold)).lineLimit(1).fixedSize()
+                    if best { Text("最足").fixedSize().font(.system(size: 9.5, weight: .semibold)).foregroundColor(provColor(p)).padding(.horizontal, 5).padding(.vertical, 1.5).background(Capsule().fill(provColor(p).opacity(0.15))) }
                 }
-                Text(subline.0).font(.system(size: 11)).foregroundColor(subline.1).lineLimit(1)
-            }
+                Text(subline.0).font(.system(size: 11)).foregroundColor(subline.1).lineLimit(1).fixedSize()
+            }.layoutPriority(1)
             Spacer(minLength: 4)
             if p.wins.isEmpty { Text("没读到").font(.system(size: 12)).foregroundColor(.secondary) }
             else {
                 VStack(alignment: .leading, spacing: 6) { mini("5h", a, delay); mini("周", b, delay + 0.03) }
             }
             Text(eff == nil ? "–" : "\(showUsed ? 100 - shownEff : shownEff)%")
-                .font(.system(size: 21, weight: .semibold, design: .rounded)).monospacedDigit()
+                .font(.system(size: 19, weight: .semibold, design: .rounded)).monospacedDigit()
                 .foregroundColor(levelColor(eff)).contentTransition(.numericText(value: Double(shownEff)))
                 .animation(motion(Animation.qRise.delay(rise ? delay : 0)), value: rise)
                 .animation(motion(.qRise), value: eff)
-                .frame(width: 56, alignment: .trailing)
+                .frame(width: 50, alignment: .trailing)
         }
-        .padding(.horizontal, 16).padding(.vertical, 11)
+        .padding(.horizontal, 14).padding(.vertical, 11)
         .background(Color.primary.opacity(hover ? 0.035 : 0))
         .contentShape(Rectangle())
         .onHover { h in withAnimation(motion(.easeOut(duration: 0.2))) { hover = h } }
@@ -582,15 +630,34 @@ struct ProvRow: View {
                 Bar(pct: rise ? l : 0, color: barTint(l, p), h: 5, glow: best && l == effLeft(p))
                     .animation(motion(Animation.qRise.delay(rise ? delay : 0)), value: rise)
                     .animation(motion(.qRise), value: l)
-                    .frame(width: 62)
-                Text(w.resets.map { shortCountdown($0) } ?? "未计时").font(.system(size: 10)).monospacedDigit().foregroundColor(.secondary).frame(width: 46, alignment: .leading)
+                    .frame(width: 50)
+                Text(w.resets.map { shortCountdown($0) } ?? "未计时").font(.system(size: 10)).monospacedDigit().foregroundColor(.secondary).frame(width: 44, alignment: .leading)
             } else if w != nil {
-                Bar(pct: 0, color: .clear, h: 5).frame(width: 62)
-                Text("较旧").font(.system(size: 10)).foregroundColor(.orange).frame(width: 46, alignment: .leading)
+                Bar(pct: 0, color: .clear, h: 5).frame(width: 50)
+                Text("较旧").font(.system(size: 10)).foregroundColor(.orange).frame(width: 44, alignment: .leading)
             } else {
-                Text("无此限制").font(.system(size: 10)).foregroundColor(.secondary.opacity(0.7)).frame(width: 114, alignment: .leading)
+                Text("无此限制").font(.system(size: 10)).foregroundColor(.secondary.opacity(0.7)).frame(width: 100, alignment: .leading)
             }
         }.help(w.map { niceLabel($0.label) + "：" + (left($0).map { "剩 \($0)%，" } ?? "") + resetText($0.resets) } ?? "")
+    }
+}
+
+/// 左上角的样式图标：极简 = 线框（和菜单栏图标一样），正常 = 立体（蓝色渐变、高光、投影）
+struct ModeIcon: View {
+    let raised: Bool
+    var body: some View {
+        let blue = Color(red: 0.18, green: 0.45, blue: 0.84)
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [Color(red: 0.40, green: 0.66, blue: 0.97), blue], startPoint: .top, endPoint: .bottom))
+                .overlay(Circle().fill(LinearGradient(colors: [.white.opacity(0.5), .clear], startPoint: .top, endPoint: .center)).padding(1.2))
+                .overlay(Circle().stroke(Color.black.opacity(0.12), lineWidth: 0.5))
+                .overlay(Capsule().fill(.white).frame(width: 5.5, height: 10.5).shadow(color: .black.opacity(0.22), radius: 0.6, y: 0.6))
+                .shadow(color: blue.opacity(0.45), radius: 3, y: 2)
+                .opacity(raised ? 1 : 0).scaleEffect(raised ? 1 : 0.55)
+            Image(nsImage: tokenIcon(18)).resizable().renderingMode(.template).frame(width: 18, height: 18)
+                .opacity(raised ? 0 : 1).scaleEffect(raised ? 1.25 : 1)
+        }.frame(width: 22, height: 22)
     }
 }
 
@@ -637,8 +704,8 @@ struct SlimCost: View {
         Button { s.openDetail?() } label: {
             HStack(spacing: 6) {
                 Text("今天").foregroundColor(.secondary)
-                Text(s.cost.ok ? s.money(s.cost.today) : "–").fontWeight(.semibold).monospacedDigit()
-                Text("· 近 7 天 " + (s.cost.ok ? s.money(s.cost.week) : "–")).foregroundColor(.secondary).monospacedDigit()
+                Text(s.cost.ok ? s.spend(s.cost.today, s.cost.todayTok) : "–").fontWeight(.semibold).monospacedDigit()
+                Text("· 近 7 天 " + (s.cost.ok ? s.spend(s.cost.week, s.cost.weekTok) : "–")).foregroundColor(.secondary).monospacedDigit()
                 Spacer()
                 Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
             }.font(.system(size: 12)).padding(.horizontal, 14).padding(.vertical, 10)
@@ -657,13 +724,13 @@ struct CostTile: View {
         Button { s.openDetail?() } label: {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("今天 · API 估算").font(.system(size: 11)).foregroundColor(.secondary)
-                    Text(s.cost.ok ? s.money(s.cost.today) : "–").font(.system(size: 21, weight: .bold, design: .rounded)).monospacedDigit().foregroundColor(inkStrong)
+                    Text(s.tokenMode ? "今天用的 token" : "今天 · API 估算").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1).fixedSize()
+                    Text(s.cost.ok ? s.spend(s.cost.today, s.cost.todayTok, compact: s.tokenMode) : "–").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit().foregroundColor(inkStrong).lineLimit(1).fixedSize()
                         .contentTransition(.numericText(value: s.cost.today)).animation(motion(.qRise), value: s.cost.today)
-                    Text(s.cost.ok ? "近 7 天 " + s.money(s.cost.week) : "读取中…").font(.system(size: 11)).foregroundColor(.secondary)
+                    Text(s.cost.ok ? "近 7 天 " + s.spend(s.cost.week, s.cost.weekTok) : "读取中…").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 6)
-                Spark(vals: s.cost.daily).frame(width: 118, height: 36).opacity(s.hidePrivate ? 0.25 : 1)
+                Spark(vals: s.tokenMode ? s.cost.dailyTok : s.cost.daily).frame(width: 92, height: 34).opacity(s.hidePrivate ? 0.25 : 1)
                 HStack(spacing: 2) { Text("展开").font(.system(size: 12, weight: .medium)); Image(systemName: "arrow.up.right").font(.system(size: 10, weight: .semibold)).offset(x: hover ? 2 : 0) }
                     .foregroundColor(.secondary)
             }.padding(.horizontal, 16).padding(.vertical, 12)
@@ -711,9 +778,7 @@ struct ManagePage: View {
                         ForEach(Array(s.provs.enumerated()), id: \.element.id) { i, p in
                             if i > 0 { Divider().padding(.leading, 56) }
                             sourceRow(p)
-                                .opacity(dragging == p.file ? 0.4 : 1)
-                                .onDrag { dragging = p.file; return NSItemProvider(object: p.file as NSString) }
-                                .onDrop(of: [UTType.text], delegate: ReorderDrop(target: p.file, dragging: $dragging, s: s))
+                                .modifier(Reorderable(file: p.file, dragging: $dragging, s: s, dim: 0.4))
                         }
                     }
                     Text("拖动左边的三道杠调顺序，面板和菜单栏都按这个顺序。").font(.system(size: 11)).foregroundColor(.secondary).padding(.horizontal, 6).padding(.top, 6)
@@ -743,7 +808,7 @@ struct ManagePage: View {
                         Divider().padding(.leading, 16)
                         row("数字含义") { PillSeg(items: ["剩余", "已用"], sel: Binding(get: { s.showUsed ? 1 : 0 }, set: { s.showUsed = $0 == 1 })) }
                         Divider().padding(.leading, 16)
-                        row("花费币种", useCny ? "按 1 美元 ≈ \(String(format: "%.1f", usdToCny)) 元估" : nil) { PillSeg(items: ["USD", "CNY"], sel: $s.currency) }
+                        row("花费显示", s.currency == 1 ? "按 1 美元 ≈ \(String(format: "%.1f", usdToCny)) 元估" : (s.tokenMode ? "用了多少 token（含缓存读写）" : nil)) { PillSeg(items: ["USD", "CNY", "Token"], sel: $s.currency) }
                         Divider().padding(.leading, 16)
                         row("刷新间隔") { PillSeg(items: ["15秒", "30秒", "1分", "5分"], sel: Binding(get: { [15.0, 30, 60, 300].firstIndex(of: s.interval) ?? 1 }, set: { s.interval = [15.0, 30, 60, 300][$0] })) }
                         Divider().padding(.leading, 16)
@@ -785,6 +850,17 @@ struct ManagePage: View {
                 withAnimation(motion(.qSpring)) { if v { s.hidden.removeAll { $0 == p.file } } else if !s.hidden.contains(p.file) { s.hidden.append(p.file) } } }))
                 .toggleStyle(.switch).labelsHidden()
         }.padding(.horizontal, 12).padding(.vertical, 9).contentShape(Rectangle())
+    }
+}
+/// 拖动换位置：主面板和管理页共用；离屏截图时不挂拖动（渲染器画不出来）
+struct Reorderable: ViewModifier {
+    let file: String; @Binding var dragging: String?; let s: Store; var dim = 0.4
+    func body(content: Content) -> some View {
+        if isSnapshot { content } else {
+            content.opacity(dragging == file ? dim : 1)
+                .onDrag { dragging = file; return NSItemProvider(object: file as NSString) }
+                .onDrop(of: [UTType.text], delegate: ReorderDrop(target: file, dragging: $dragging, s: s))
+        }
     }
 }
 struct ReorderDrop: DropDelegate {

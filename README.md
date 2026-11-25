@@ -23,11 +23,12 @@
 - **一句话结论**：顶上直接写「Codex 余量最足。」，快见底、会提前用完的另起一行提醒。
 - **能用余量**：每家都有 5 小时和 1 周两个限制，哪个先到就卡在哪个，所以大数字取两者里小的那个。
 - **用完预测**：按目前的使用速度算，会在重置前用完的，直接写出「明天 10:51 会用完」。
-- **两种样式**：极简模式每家只占一行；正常模式显示两个窗口、倒计时和套餐名。
-- **花费估算**：今天、近 7 天按 API 价格估算的花费，附 14 天走势；点开有按模型、按天的明细窗口。
+- **两种样式**：点左上角的图标就换（极简是线框图标，正常是立体图标），顶栏不动，下面的内容先收上去、再拉下来。简模式每家只占一行；常模式加上结论句、两个窗口、倒计时和套餐名。
+- **拖动排序**：面板里每一行都能直接拖动换位置，松手后一直记住。
+- **花费 / Token**：今天、近 7 天的花费（按 API 价估算，美元或人民币），也可以切成用了多少 token；附 14 天走势，点开有按模型、按天的明细窗口。
 - **菜单栏四种显示**：仅图标 / 最低余量 / 每家都显示 / 今日花费。
 - **快见底通知**：任一窗口低于 20% 时提醒一次，每个重置周期只提醒一次。
-- **管理页**：拖动排序、按家显示或隐藏、隐藏个人信息（截图用）、剩余或已用、美元或人民币、刷新间隔、开机启动。
+- **管理页**：拖动排序、按家显示或隐藏、隐藏个人信息（截图用）、剩余或已用、美元 / 人民币 / Token、刷新间隔、开机启动。
 - **动效**：打开时进度条依次涨起、数字滚动、刷新按钮转一圈；系统打开「减少动态效果」时全部关闭。
 - 浅色、深色都适配。
 
@@ -90,7 +91,7 @@
 **T3 用量栏 (T3UsageBar)** is a tiny macOS menu bar app that shows how much quota you have left on Claude, Codex, Grok and Gemini, using the numbers [T3 Code](https://t3.codes) already caches on your Mac.
 
 - One-line verdict at the top ("Codex has the most left"), usable quota = the smaller of the 5-hour and weekly windows, and a "will run out at …" forecast based on your current pace.
-- Minimal and full layouts, today / 7-day API-cost estimate with a sparkline, four menu bar modes, low-quota notifications, drag-to-reorder sources, light & dark mode.
+- Minimal and full layouts, today / 7-day API-cost estimate with a sparkline, four menu bar modes, low-quota notifications, drag any row to reorder (remembered), light & dark mode.
 - Offline and local-only: reads `~/.t3` caches, never touches credentials.
 
 **Install:** download the zip from [Releases](../../releases), move the app to Applications, then right-click → Open the first time (the app is ad-hoc signed, not notarized). Requires macOS 14+ (Intel or Apple silicon) and T3 Code. UI is in Chinese.
