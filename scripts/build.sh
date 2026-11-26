@@ -23,6 +23,7 @@ for ARCH in arm64 x86_64; do
 done
 lipo -create "$BUILD/UsageBar-arm64" "$BUILD/UsageBar-x86_64" -output "$APP/Contents/MacOS/$NAME"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp -R Resources/logos "$APP/Contents/Resources/logos"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
